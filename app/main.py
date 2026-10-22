@@ -5,7 +5,7 @@ from typing import List, Optional
 app = FastAPI(
     title="ПСИОН",
     description="Программа Сканирования И Организации Новостей",
-    version="0.2.0",
+    version="0.2.1",
 )
 
 # ---------- Модели (то, как выглядит JSON) ----------
