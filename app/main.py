@@ -1,116 +1,38 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
-from typing import List, Optional
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from app.data_loader import load_companies, get_company, get_company_counterparties
+from pydantic import BaseModel, Field
+from typing import List, Optional
 import os
+
+from app.data_loader import (
+    load_companies, get_company, get_company_counterparties,
+    get_company_persons,
+)
+from app.models import Client, Event, Source, Consequences
+from app.profiling import ClientProfile
+from app.matching import score_event
+from app.news_parser import fetch_news, news_to_event, _interpret
+from app.demo_events import get_demo_events
 
 app = FastAPI(
     title="ПСИОН",
     description="Программа Сканирования И Организации Новостей",
-    version="0.2.1",
+    version="0.3.3",
 )
 
-# Раздача статики
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-# ---------- Модели (то, как выглядит JSON) ----------
-
-class Client(BaseModel):
-    id: str
-    name: str
-    industry: str
-    region: str
-    revenue: float
-    bank_products: List[str] = Field(default_factory=list)
-
-class Source(BaseModel):
-    title: str
-    url: Optional[str] = None
-    type: str  # "news" | "alfa_analytics"
-
-class Consequences(BaseModel):
-    risks: List[str] = Field(default_factory=list)
-    opportunities: List[str] = Field(default_factory=list)
-
-class Event(BaseModel):
-    id: str
-    client_id: str
-    title: str
-    what_happened: str
-    why_important: str
-    consequences: Consequences
-    actions: List[str] = Field(default_factory=list)
-    bank_view: str
-    ai_view: str
-    sources: List[Source] = Field(default_factory=list)
-    client_signals: List[str] = Field(default_factory=list)
-    relevance_score: float = 0.0
 
 class AskRequest(BaseModel):
     question: str
+
 
 class AskResponse(BaseModel):
     answer: str
     sources: List[Source] = Field(default_factory=list)
 
-# ---------- Фейковые данные (потом заменим на CSV/БД) ----------
-
-CLIENTS = [
-    Client(id="c1", name="ООО Ромашка", industry="Производство",
-           region="Москва", revenue=20_000_000_000,
-           bank_products=["RKO", "LOAN"]),
-    Client(id="c2", name="АО Лютик", industry="Ритейл",
-           region="Санкт-Петербург", revenue=18_000_000_000,
-           bank_products=["RKO", "DEP"]),
-]
-
-EVENTS = [
-    Event(
-        id="e1", client_id="c1",
-        title="ЦБ сохранил ключевую ставку на уровне 14%",
-        what_happened="Совет директоров Банка России сохранил ключевую ставку на уровне 14% годовых.",
-        why_important="У компании есть кредитные продукты — сохранение ставки означает, что стоимость обслуживания долга не снизится.",
-        consequences=Consequences(
-            risks=["Рост процентных расходов", "Давление на маржу"],
-            opportunities=["Пересмотр графика платежей", "Хеджирование ставки"],
-        ),
-        actions=["Пересмотреть кредитный портфель", "Оценить рефинансирование"],
-        bank_view="Аналитики Альфа-Банка ожидают паузу в цикле смягчения ДКП.",
-        ai_view="Модель связала событие с наличием кредитных продуктов у клиента.",
-        sources=[Source(title="Ключевая ставка ЦБ РФ", type="alfa_analytics")],
-        client_signals=["CL_PRODUCT_LOA_MARK=1", "отрасль: Производство"],
-        relevance_score=0.92,
-    ),
-    Event(
-        id="e2", client_id="c2",
-        title="Рост потребления в ритейле",
-        what_happened="Данные макростатистики указывают на рост потребления.",
-        why_important="Клиент работает в ритейле — рост потребления может увеличить выручку.",
-        consequences=Consequences(
-            risks=["Рост закупочных цен"],
-            opportunities=["Рост выручки", "Расширение ассортимента"],
-        ),
-        actions=["Проанализировать спрос по категориям"],
-        bank_view="Аналитика банка: потребление на пике.",
-        ai_view="Модель связала событие с отраслью клиента.",
-        sources=[Source(title="Потребление на пике", type="alfa_analytics")],
-        client_signals=["MAINOKVED_NAME=Ритейл"],
-        relevance_score=0.85,
-    ),
-]
-
-def _client_from_row(uid: str, row: dict) -> Client:
-    return Client(
-        id=uid,
-        name=f"Компания {uid}",  # имени в CSV нет — придумаем псевдоним
-        industry=row.get("MAINOKVED_NAME", "—"),
-        region=row.get("REGION", "—"),
-        revenue=float(row.get("REVENUE_COMPANY") or 0),
-        bank_products=_bank_products(row),
-    )
 
 def _bank_products(row: dict) -> list[str]:
     mapping = {
@@ -124,13 +46,83 @@ def _bank_products(row: dict) -> list[str]:
     }
     return [name for col, name in mapping.items() if row.get(col) in ("1", "1.0", "True", "true")]
 
+
+def _age_years(row: dict) -> int:
+    grad = (row.get("COMPANY_AGE_YEARS_GRADATION") or "").lower()
+    if "<1" in grad or "до 1" in grad: return 1
+    if "1-3" in grad or "1–3" in grad: return 2
+    if "3-5" in grad or "3–5" in grad: return 4
+    if "5-10" in grad or "5–10" in grad: return 7
+    if ">10" in grad or "более 10" in grad or "10+" in grad: return 15
+    return 5
+
+
+def _client_from_row(uid: str, row: dict) -> Client:
+    fts_raw = row.get("FTS_COUNTRY_NAME") or ""
+    fts_countries = [c.strip() for c in fts_raw.replace(";", ",").split(",") if c.strip()]
+    payments = get_company_counterparties(uid)
+    counterparts = sorted({
+        p["PAYER"] if p.get("BENEFICIARY") == uid else p.get("BENEFICIARY")
+        for p in payments
+        if p.get("PAYER") and p.get("BENEFICIARY")
+    })
+    return Client(
+        id=uid,
+        name=f"Компания {uid}",
+        industry=row.get("MAINOKVED_NAME") or "—",
+        region=row.get("REGION") or "—",
+        revenue=float(row.get("REVENUE_COMPANY") or 0),
+        bank_products=_bank_products(row),
+        age_years=_age_years(row),
+        fts_countries=fts_countries,
+        counterparties=counterparts,
+    )
+
+
+@app.get("/", include_in_schema=False)
+def index():
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
+
+@app.get("/health", tags=["root"])
+def health_check():
+    return {"status": "ok", "service": "ПСИОН"}
+
+
+@app.get("/clients/search", response_model=List[Client], tags=["clients"])
+def search_clients(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(20, ge=1, le=100),
+):
+    q_low = q.strip().lower()
+    found = []
+    for uid, r in load_companies().items():
+        haystack = " ".join([
+            uid, r.get("REGION") or "", r.get("CITY") or "",
+            r.get("MAINOKVED_NAME") or "", r.get("OKFS_NAME") or "",
+        ]).lower()
+        if q_low in haystack:
+            found.append((uid, r))
+        if len(found) >= limit:
+            break
+    return [_client_from_row(u, r) for u, r in found]
+
+
 @app.get("/clients", response_model=List[Client], tags=["clients"])
-def list_clients(limit: int = 50, offset: int = 0, industry: str | None = None):
+def list_clients(
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    industry: Optional[str] = None,
+    region: Optional[str] = None,
+):
     rows = list(load_companies().items())
     if industry:
-        rows = [(uid, r) for uid, r in rows if industry.lower() in r.get("MAINOKVED_NAME", "").lower()]
-    page = rows[offset : offset + limit]
-    return [_client_from_row(uid, r) for uid, r in page]
+        rows = [(u, r) for u, r in rows if industry.lower() in (r.get("MAINOKVED_NAME") or "").lower()]
+    if region:
+        rows = [(u, r) for u, r in rows if region.lower() in (r.get("REGION") or "").lower()]
+    page = rows[offset: offset + limit]
+    return [_client_from_row(u, r) for u, r in page]
+
 
 @app.get("/clients/{client_id}", response_model=Client, tags=["clients"])
 def get_client(client_id: str):
@@ -139,55 +131,98 @@ def get_client(client_id: str):
         raise HTTPException(status_code=404, detail="Клиент не найден")
     return _client_from_row(client_id, row)
 
-# ---------- Служебные эндпоинты ----------
 
-@app.get("/", tags=["root"])
-def root():
-    return {"service": "ПСИОН", "docs": "/docs", "health": "/health"}
+@app.get("/clients/{client_id}/context", tags=["clients"])
+def get_client_context(client_id: str):
+    row = get_company(client_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Клиент не найден")
+    client = _client_from_row(client_id, row)
+    profile = ClientProfile(client)
+    payments = get_company_counterparties(client_id)
+    return {
+        "company": client.model_dump(),
+        "signals": profile.signals,
+        "risks": profile.risks,
+        "opportunities": profile.opportunities,
+        "persons_count": len(get_company_persons(client_id)),
+        "payments_total": sum(float(p.get("PAY_AMT") or 0) for p in payments),
+    }
 
-@app.get("/health", tags=["root"])
-def health_check():
-    return {"status": "ok", "service": "ПСИОН"}
 
-# ---------- Клиенты ----------
+@app.get("/news/search", tags=["news"])
+def search_news(q: str = Query(..., min_length=2), limit: int = Query(20, ge=1, le=100)):
+    q_low = q.lower()
+    results = []
+    for n in fetch_news(limit=200):
+        text = f"{n['title']} {n.get('summary', '')}".lower()
+        if q_low in text:
+            results.append(n)
+        if len(results) >= limit:
+            break
+    return results
 
-@app.get("/clients", response_model=List[Client], tags=["clients"])
-def list_clients():
-    return CLIENTS
-
-@app.get("/clients/{client_id}", response_model=Client, tags=["clients"])
-def get_client(client_id: str):
-    for c in CLIENTS:
-        if c.id == client_id:
-            return c
-    raise HTTPException(status_code=404, detail="Клиент не найден")
-
-# ---------- Лента и события ----------
 
 @app.get("/clients/{client_id}/feed", response_model=List[Event], tags=["events"])
-def get_feed(client_id: str):
-    feed = [e for e in EVENTS if e.client_id == client_id]
-    if not feed:
-        raise HTTPException(status_code=404, detail="Для этого клиента событий нет")
-    return sorted(feed, key=lambda e: e.relevance_score, reverse=True)
+def get_feed(client_id: str, limit: int = Query(30, ge=1, le=100)):
+    row = get_company(client_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Клиент не найден")
+    client = _client_from_row(client_id, row)
+    profile = ClientProfile(client)
+
+    scored: list[Event] = []
+
+    # 1. Реальные новости из RSS
+    for n in fetch_news(limit=100):
+        ev = news_to_event(n, client_id)
+        if not ev:
+            continue
+        result = score_event(ev, client, profile=profile)
+        ev.relevance_score = result["score"]
+        ev.client_signals = result["matched_signals"]
+        _interpret(ev, ev.tags, ev.client_signals)
+        # берём всё, что дало хоть какой-то скор (даже слабый)
+        if result["score"] > 0:
+            scored.append(ev)
+
+    # 2. Демо-события (всегда, чтобы лента была содержательной)
+    demo = get_demo_events(client_id)
+    for ev in demo:
+        result = score_event(ev, client, profile=profile)
+        ev.client_signals = result["matched_signals"] or ["demo_event"]
+        _interpret(ev, ev.tags, ev.client_signals)
+        scored.append(ev)
+
+    scored.sort(key=lambda e: e.relevance_score, reverse=True)
+    return scored[:limit]
+
 
 @app.get("/events/{event_id}", response_model=Event, tags=["events"])
 def get_event(event_id: str):
-    for e in EVENTS:
-        if e.id == event_id:
-            return e
+    if event_id.startswith("demo-"):
+        # demo-{client_id}-{n}
+        parts = event_id.split("-")
+        if len(parts) >= 3:
+            client_id = parts[1]
+            for ev in get_demo_events(client_id):
+                if ev.id == event_id:
+                    return ev
+    for n in fetch_news(limit=200):
+        ev = news_to_event(n, client_id="")
+        if ev and ev.id == event_id:
+            _interpret(ev, ev.tags, [])
+            return ev
     raise HTTPException(status_code=404, detail="Событие не найдено")
+
 
 @app.post("/events/{event_id}/ask", response_model=AskResponse, tags=["events"])
 def ask_event(event_id: str, req: AskRequest):
-    for e in EVENTS:
-        if e.id == event_id:
-            return AskResponse(
-                answer=f"[Заглушка] Вы спросили: «{req.question}». Ответ по событию «{e.title}» будет сгенерирован LLM позже.",
-                sources=e.sources,
-            )
-    raise HTTPException(status_code=404, detail="Событие не найдено")
-
-@app.get("/ui", include_in_schema=False)
-def ui():
-    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+    ev = get_event(event_id)
+    return AskResponse(
+        answer=(
+            f"[Заглушка] Вопрос: «{req.question}». "
+            f"По событию «{ev.title}». LLM-ответ будет здесь."
+        ),
+        sources=ev.sources,
+    )
