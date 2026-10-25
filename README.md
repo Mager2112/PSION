@@ -52,7 +52,7 @@ docker run -p 8000:8000 psion
 ```
 ## Скриншоты
 ## Изображения ##
-![image](screenshots/Screenshot from 2026-10-25 19-48-24.png)
+![image](https://github.com/Mager2112/PSION/blob/main/screenshots/Screenshot%20from%202026-10-25%2019-35-34.png)
 Перечень компаний слева, а справа - новости
-![image](screenshots/Screenshot from 2026-10-25 19-51-45.png)
+![image](https://github.com/Mager2112/PSION/blob/main/screenshots/Screenshot%20from%202026-10-25%2019-51-45.png)
 Одна из новостей
