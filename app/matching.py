@@ -10,6 +10,11 @@ EVENT_SIGNAL_MAP = {
     "consumption": ["industry:Ритейл", "industry:Производство"],
     "logistics": ["foreign_trade", "counterparties"],
     "commodities": ["foreign_trade", "large_business"],
+    "it": ["industry:IT", "large_business"],
+    "technology": ["industry:IT", "large_business"],
+    "digital": ["industry:IT", "large_business"],
+    "medicine": ["industry:Медицина"],
+    "construction": ["industry:Строительство", "credit_exposure"],
 }
 
 WEAK_SIGNALS = {"large_business", "mature_company", "counterparties"}
