@@ -36,22 +36,37 @@
 - Python 3.12+
 - Docker (опционально, но рекомендуется)
 
-### Установка и запуск
+### Локальный запуск (без Docker)
 
 ```bash
+# 1. Клонировать репозиторий
 git clone https://github.com/Mager2112/PSION.git
 cd PSION
+
+# 2. Создать и активировать виртуальное окружение
 python -m venv hack
-source hack/bin/activate
+source hack/bin/activate  # Linux/macOS
+# hack\Scripts\activate   # Windows
+
+# 3. Установить зависимости
 pip install -r requirements.txt
+
+# 4. Положить CSV-файлы в папку data/
+# data/df_Uid_data_hack.csv
+# data/df_Fid_Uid_link_hack.csv
+# data/df_Uid_payment_hack.csv
+
+# 5. Запустить сервер
+uvicorn app.main:app --reload
+## Скриншоты
+## Изображения ##
 ```
-Затем нужно запустить докер
+### Запуск с Docker
 ```bash
 docker build -t psion .
 docker run -p 8000:8000 psion
 ```
-## Скриншоты
-## Изображения ##
+
 ![image](https://github.com/Mager2112/PSION/blob/main/screenshots/Screenshot%20from%202026-10-25%2019-35-34.png)
 Перечень компаний слева, а справа - новости
 ![image](https://github.com/Mager2112/PSION/blob/main/screenshots/Screenshot%20from%202026-10-25%2019-51-45.png)
