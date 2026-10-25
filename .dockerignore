@@ -1,0 +1,8 @@
+venv/
+hack/
+__pycache__/
+*.pyc
+.git/
+.env
+Screenshots/
+README.md
