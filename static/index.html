@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ПСИОН — Новостная аналитика</title>
+<style>
+  :root {
+    --alfa-red: #ef3124;
+    --alfa-red-dark: #c41e14;
+    --bg: #f5f6f8;
+    --card: #ffffff;
+    --text: #1a1a1a;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --green: #16a34a;
+    --orange: #ea580c;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.5;
+  }
+  header {
+    background: var(--alfa-red); color: white; padding: 16px 24px;
+    display: flex; align-items: center; gap: 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.15);
+  }
+  header .logo { font-size: 24px; font-weight: 800; letter-spacing: 1px; }
+  header .subtitle { font-size: 13px; opacity: .9; }
+  .container { max-width: 1100px; margin: 0 auto; padding: 24px; display: grid; grid-template-columns: 320px 1fr; gap: 24px; }
+  @media (max-width: 800px) { .container { grid-template-columns: 1fr; } }
+  .panel { background: var(--card); border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .panel h2 { font-size: 16px; margin-bottom: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .client-list { display: flex; flex-direction: column; gap: 8px; }
+  .client-item {
+    padding: 12px; border: 1px solid var(--border); border-radius: 8px;
+    cursor: pointer; transition: all .15s;
+  }
+  .client-item:hover { border-color: var(--alfa-red); background: #fff5f4; }
+  .client-item.active { border-color: var(--alfa-red); background: #fff0ee; box-shadow: 0 0 0 2px rgba(239,49,36,.15); }
+  .client-item .name { font-weight: 600; }
+  .client-item .meta { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .badge { display: inline-block; background: var(--alfa-red); color: white; font-size: 11px; padding: 2px 8px; border-radius: 10px; margin-left: 6px; }
+  .event-card { border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 12px; cursor: pointer; transition: all .15s; }
+  .event-card:hover { border-color: var(--alfa-red); box-shadow: 0 2px 8px rgba(239,49,36,.1); }
+  .event-card .title { font-weight: 600; margin-bottom: 6px; }
+  .event-card .score { font-size: 12px; color: var(--green); font-weight: 600; }
+  .event-detail { display: none; }
+  .event-detail.visible { display: block; }
+  .section { margin-bottom: 16px; }
+  .section h3 { font-size: 13px; text-transform: uppercase; color: var(--muted); letter-spacing: .5px; margin-bottom: 6px; }
+  .section p, .section li { font-size: 14px; }
+  .section ul { padding-left: 20px; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 600px) { .two-col { grid-template-columns: 1fr; } }
+  .box { padding: 12px; border-radius: 8px; font-size: 14px; }
+  .box.risk { background: #fef2f2; border-left: 3px solid var(--alfa-red); }
+  .box.opp { background: #f0fdf4; border-left: 3px solid var(--green); }
+  .box.bank { background: #eff6ff; border-left: 3px solid #2563eb; }
+  .box.ai { background: #faf5ff; border-left: 3px solid #9333ea; }
+  .source-link { display: block; font-size: 13px; color: #2563eb; text-decoration: none; margin-top: 4px; }
+  .source-link:hover { text-decoration: underline; }
+  .ask-box { display: flex; gap: 8px; margin-top: 12px; }
+  .ask-box input { flex: 1; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; }
+  .ask-box button { background: var(--alfa-red); color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+  .ask-box button:hover { background: var(--alfa-red-dark); }
+  .answer { margin-top: 12px; padding: 12px; background: var(--bg); border-radius: 8px; font-size: 14px; }
+  .empty { color: var(--muted); font-size: 14px; padding: 20px; text-align: center; }
+  .loading { color: var(--muted); font-size: 14px; padding: 20px; text-align: center; }
+  .back-btn { background: none; border: none; color: var(--alfa-red); cursor: pointer; font-size: 14px; font-weight: 600; margin-bottom: 12px; padding: 0; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">ПСИОН</div>
+  <div class="subtitle">Программа Сканирования И Организации Новостей</div>
+</header>
+
+<div class="container">
+  <!-- Левая панель: клиенты -->
+  <aside class="panel">
+    <h2>Клиенты</h2>
+    <div id="client-list" class="client-list"><div class="loading">Загрузка...</div></div>
+  </aside>
+
+  <!-- Правая панель: лента / детали -->
+  <main class="panel">
+    <div id="feed-view">
+      <h2 id="feed-title">Выберите клиента</h2>
+      <div id="feed-list"><div class="empty">Слева выберите компанию, чтобы увидеть значимые события.</div></div>
+    </div>
+    <div id="detail-view" class="event-detail"></div>
+  </main>
+</div>
+
+<script>
+const API = ""; // тот же origin, что и страница
+
+let currentClient = null;
+
+// --- Загрузка клиентов ---
+async function loadClients() {
+  const el = document.getElementById("client-list");
+  try {
+    const res = await fetch(`${API}/clients`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const clients = await res.json();
+    if (!clients.length) { el.innerHTML = '<div class="empty">Клиентов нет</div>'; return; }
+    el.innerHTML = clients.map(c => `
+      <div class="client-item" data-id="${c.id}" onclick="selectClient('${c.id}')">
+        <div class="name">${c.name}</div>
+        <div class="meta">${c.industry} · ${c.region}</div>
+        <div class="meta">Выручка: ${formatMoney(c.revenue)}</div>
+      </div>
+    `).join("");
+  } catch (e) {
+    el.innerHTML = `<div class="empty">Ошибка загрузки клиентов: ${e.message}</div>`;
+  }
+}
+
+function formatMoney(v) {
+  if (v >= 1e9) return (v / 1e9).toFixed(1) + " млрд ₽";
+  if (v >= 1e6) return (v / 1e6).toFixed(1) + " млн ₽";
+  return v + " ₽";
+}
+
+// --- Выбор клиента и загрузка ленты ---
+async function selectClient(id) {
+  currentClient = id;
+  document.querySelectorAll(".client-item").forEach(el => {
+    el.classList.toggle("active", el.dataset.id === id);
+  });
+  showFeed();
+  const title = document.getElementById("feed-title");
+  const list = document.getElementById("feed-list");
+  title.textContent = "Значимые события";
+  list.innerHTML = '<div class="loading">Загрузка ленты...</div>';
+  try {
+    const res = await fetch(`${API}/clients/${id}/feed`);
+    if (res.status === 404) { list.innerHTML = '<div class="empty">Для этого клиента событий нет.</div>'; return; }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const events = await res.json();
+    if (!events.length) { list.innerHTML = '<div class="empty">Событий нет.</div>'; return; }
+    list.innerHTML = events.map(e => `
+      <div class="event-card" onclick="openEvent('${e.id}')">
+        <div class="title">${e.title}</div>
+        <div class="score">Релевантность: ${e.relevance_score.toFixed(2)}</div>
+      </div>
+    `).join("");
+  } catch (e) {
+    list.innerHTML = `<div class="empty">Ошибка: ${e.message}</div>`;
+  }
+}
+
+// --- Детали события ---
+async function openEvent(id) {
+  const detail = document.getElementById("detail-view");
+  document.getElementById("feed-view").style.display = "none";
+  detail.classList.add("visible");
+  detail.innerHTML = '<div class="loading">Загрузка события...</div>';
+  try {
+    const res = await fetch(`${API}/events/${id}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const e = await res.json();
+    renderEvent(e);
+  } catch (err) {
+    detail.innerHTML = `<div class="empty">Ошибка: ${err.message}</div>`;
+  }
+}
+
+function renderEvent(e) {
+  const detail = document.getElementById("detail-view");
+  detail.innerHTML = `
+    <button class="back-btn" onclick="showFeed()">← Назад к ленте</button>
+    <h2 style="font-size:20px; margin-bottom:16px;">${e.title}</h2>
+
+    <div class="section">
+      <h3>Что произошло</h3>
+      <p>${e.what_happened}</p>
+    </div>
+
+    <div class="section">
+      <h3>Почему это важно для компании</h3>
+      <p>${e.why_important}</p>
+    </div>
+
+    <div class="two-col section">
+      <div>
+        <h3>Риски</h3>
+        <div class="box risk">${listOrDash(e.consequences.risks)}</div>
+      </div>
+      <div>
+        <h3>Возможности</h3>
+        <div class="box opp">${listOrDash(e.consequences.opportunities)}</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Возможные действия</h3>
+      <div class="box">${listOrDash(e.actions)}</div>
+    </div>
+
+    <div class="two-col section">
+      <div>
+        <h3>Оценка Альфа-Банка</h3>
+        <div class="box bank">${e.bank_view}</div>
+      </div>
+      <div>
+        <h3>Вывод AI</h3>
+        <div class="box ai">${e.ai_view}</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Источники</h3>
+      ${e.sources.length ? e.sources.map(s =>
+        s.url
+          ? `<a class="source-link" href="${s.url}" target="_blank">${s.title} ↗</a>`
+          : `<div class="source-link" style="color:#6b7280;">${s.title} (${s.type})</div>`
+      ).join("") : '<p>—</p>'}
+    </div>
+
+    <div class="section">
+      <h3>Задать уточняющий вопрос</h3>
+      <div class="ask-box">
+        <input id="ask-input" placeholder="Например: какие действия рекомендуете?" onkeydown="if(event.key==='Enter') askQuestion('${e.id}')">
+        <button onclick="askQuestion('${e.id}')">Спросить</button>
+      </div>
+      <div id="ask-answer"></div>
+    </div>
+  `;
+}
+
+function listOrDash(arr) {
+  if (!arr || !arr.length) return "<p>—</p>";
+  return "<ul>" + arr.map(x => `<li>${x}</li>`).join("") + "</ul>";
+}
+
+async function askQuestion(eventId) {
+  const input = document.getElementById("ask-input");
+  const q = input.value.trim();
+  if (!q) return;
+  const box = document.getElementById("ask-answer");
+  box.innerHTML = '<div class="loading">Думаем...</div>';
+  try {
+    const res = await fetch(`${API}/events/${eventId}/ask`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question: q }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    box.innerHTML = `<div class="answer">${data.answer}</div>`;
+  } catch (e) {
+    box.innerHTML = `<div class="empty">Ошибка: ${e.message}</div>`;
+  }
+}
+
+function showFeed() {
+  document.getElementById("detail-view").classList.remove("visible");
+  document.getElementById("feed-view").style.display = "block";
+}
+
+// Старт
+loadClients();
+</script>
+</body>
+</html>

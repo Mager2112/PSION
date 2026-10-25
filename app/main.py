@@ -1,12 +1,20 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from typing import List, Optional
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from app.data_loader import load_companies, get_company, get_company_counterparties
+import os
 
 app = FastAPI(
     title="ПСИОН",
     description="Программа Сканирования И Организации Новостей",
     version="0.2.1",
 )
+
+# Раздача статики
+STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # ---------- Модели (то, как выглядит JSON) ----------
 
@@ -94,6 +102,43 @@ EVENTS = [
     ),
 ]
 
+def _client_from_row(uid: str, row: dict) -> Client:
+    return Client(
+        id=uid,
+        name=f"Компания {uid}",  # имени в CSV нет — придумаем псевдоним
+        industry=row.get("MAINOKVED_NAME", "—"),
+        region=row.get("REGION", "—"),
+        revenue=float(row.get("REVENUE_COMPANY") or 0),
+        bank_products=_bank_products(row),
+    )
+
+def _bank_products(row: dict) -> list[str]:
+    mapping = {
+        "CL_PRODUCT_RKO_MARK": "RKO",
+        "CL_PRODUCT_GAR_MARK": "GAR",
+        "CL_PRODUCT_LOA_MARK": "LOAN",
+        "CL_PRODUCT_LEA_MARK": "LEASING",
+        "CL_PRODUCT_DEP_MARK": "DEPOSIT",
+        "CL_PRODUCT_ZPP_MARK": "SALARY",
+        "FACTORING_MARK": "FACTORING",
+    }
+    return [name for col, name in mapping.items() if row.get(col) in ("1", "1.0", "True", "true")]
+
+@app.get("/clients", response_model=List[Client], tags=["clients"])
+def list_clients(limit: int = 50, offset: int = 0, industry: str | None = None):
+    rows = list(load_companies().items())
+    if industry:
+        rows = [(uid, r) for uid, r in rows if industry.lower() in r.get("MAINOKVED_NAME", "").lower()]
+    page = rows[offset : offset + limit]
+    return [_client_from_row(uid, r) for uid, r in page]
+
+@app.get("/clients/{client_id}", response_model=Client, tags=["clients"])
+def get_client(client_id: str):
+    row = get_company(client_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Клиент не найден")
+    return _client_from_row(client_id, row)
+
 # ---------- Служебные эндпоинты ----------
 
 @app.get("/", tags=["root"])
@@ -142,3 +187,7 @@ def ask_event(event_id: str, req: AskRequest):
                 sources=e.sources,
             )
     raise HTTPException(status_code=404, detail="Событие не найдено")
+
+@app.get("/ui", include_in_schema=False)
+def ui():
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
