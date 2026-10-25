@@ -66,7 +66,7 @@ uvicorn app.main:app --reload
 docker build -t psion .
 docker run -p 8000:8000 psion
 ```
-
+## Снимки экрана
 ![image](https://github.com/Mager2112/PSION/blob/main/screenshots/Screenshot%20from%202026-10-25%2019-35-34.png)
 Перечень компаний слева, а справа - новости
 ![image](https://github.com/Mager2112/PSION/blob/main/screenshots/Screenshot%20from%202026-10-25%2019-51-45.png)
